@@ -14,7 +14,7 @@ export function OnboardingApprovalMode(): React.ReactElement {
       <Select
         onChange={() => {}}
         // onChange={(value: ReviewDecision) => onReviewCommand(value)}
-        options={[
+        options=[
           {
             label: "Auto-approve file reads, but ask me for edits and commands",
             value: AutoApprovalMode.SUGGEST,
@@ -28,7 +28,12 @@ export function OnboardingApprovalMode(): React.ReactElement {
               "Auto-approve file reads, edits, and running commands network-disabled",
             value: AutoApprovalMode.FULL_AUTO,
           },
-        ]}
+          {
+            label:
+              "Auto-approve file reads, edits, and running commands without sandbox",
+            value: AutoApprovalMode.GOD_MODE,
+          },
+        ]
       />
     </Box>
   );
