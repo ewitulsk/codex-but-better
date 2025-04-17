@@ -494,8 +494,7 @@ export class AgentLoop {
             if (this.model.startsWith("o")) {
               reasoning = { effort: "high" };
               if (this.model === "o3" || this.model === "o4-mini") {
-                // @ts-expect-error waiting for API type update
-                reasoning.summary = "auto";
+                (reasoning as Record<string, unknown>)["summary"] = "auto";
               }
             }
             const mergedInstructions = [prefix, this.instructions]
@@ -599,23 +598,27 @@ export class AgentLoop {
               /rate limit/i.test(errCtx.message ?? "");
             if (isRateLimit) {
               if (attempt < MAX_RETRIES) {
-                // Exponential backoff: base wait * 2^(attempt-1), or use suggested retry time
-                // if provided.
-                let delayMs = RATE_LIMIT_RETRY_WAIT_MS * 2 ** (attempt - 1);
-
-                // Parse suggested retry time from error message, e.g., "Please try again in 1.3s"
                 const msg = errCtx?.message ?? "";
-                const m = /retry again in ([\d.]+)s/i.exec(msg);
-                if (m && m[1]) {
-                  const suggested = parseFloat(m[1]) * 1000;
-                  if (!Number.isNaN(suggested)) {
-                    delayMs = suggested;
+                // Extract the numeric back‑off time and its unit (seconds or milliseconds).
+                // Examples of messages we want to parse:
+                //   "Please try again in 806ms."
+                //   "Please try again in 4.5s."
+                //   "try again in 1s"
+                const match = /in\s+([\d.]+)\s*(ms|s)/i.exec(msg);
+                let delayMs: number;
+                if (match && match[1]) {
+                  const value = parseFloat(match[1]);
+                  const unit = (match[2] || "s").toLowerCase();
+                  if (!Number.isNaN(value)) {
+                    delayMs = unit === "ms" ? value + 1000 : value * 1000 + 1000; // add 1s buffer
+                  } else {
+                    delayMs = 60000;
                   }
+                } else {
+                  delayMs = 60000; // default wait time when parsing fails
                 }
                 log(
-                  `OpenAI rate limit exceeded (attempt ${attempt}/${MAX_RETRIES}), retrying in ${Math.round(
-                    delayMs,
-                  )} ms...`,
+                  `OpenAI rate limit exceeded (attempt ${attempt}/${MAX_RETRIES}), retrying in ${delayMs} ms...`,
                 );
                 // eslint-disable-next-line no-await-in-loop
                 await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -988,6 +991,74 @@ export class AgentLoop {
         }
         this.onLoading(false);
         return;
+      }
+
+      // ---------------------------------------------------------------------
+      // Handle rate‑limit errors that surface *after* the initial request
+      // was accepted (e.g. during the SSE stream). We parse the suggested
+      // wait time, add a 1‑second buffer, sleep, and then retry the exact
+      // same turn. This prevents the CLI from crashing while still
+      // respecting OpenAI's back‑off instructions.
+      // ---------------------------------------------------------------------
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errCtxRate: any = err;
+      const statusRate =
+        errCtxRate?.status ?? errCtxRate?.httpStatus ?? errCtxRate?.statusCode;
+      const isRateLimitLate =
+        statusRate === 429 ||
+        errCtxRate?.code === "rate_limit_exceeded" ||
+        errCtxRate?.type === "rate_limit_exceeded" ||
+        /rate limit/i.test(errCtxRate?.message ?? "");
+
+      if (isRateLimitLate) {
+        const msg = errCtxRate?.message ?? "";
+        const match = /in\s+([\d.]+)\s*(ms|s)/i.exec(msg);
+        let delayMs: number;
+        if (match && match[1]) {
+          const value = parseFloat(match[1]);
+          const unit = (match[2] || "s").toLowerCase();
+          if (!Number.isNaN(value)) {
+            delayMs = unit === "ms" ? value + 1000 : value * 1000 + 1000; // add 1s buffer
+          } else {
+            delayMs = 60000;
+          }
+        } else {
+          delayMs = 60000; // default wait time when parsing fails
+        }
+
+        log(
+          `OpenAI rate limit encountered during stream, retrying turn in ${delayMs} ms...`,
+        );
+
+        try {
+          this.onItem({
+            id: `rate-limit-${Date.now()}`,
+            type: "message",
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: "⚠️  Rate limit reached. Waiting before retrying automatically…",
+              },
+            ],
+          });
+        } catch {
+          /* best‑effort */
+        }
+
+        this.onLoading(true);
+
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+        // Reset any outstanding abort bookkeeping so we do *not* emit
+        // synthetic tool outputs that reference outdated call IDs.
+        this.pendingAborts.clear();
+
+        // Retry the same turn with the pristine arguments captured at the
+        // start of this run.
+        await this.run(input, previousResponseId);
+        return; // ensure we don't fall through.
       }
 
       // Re‑throw all other errors so upstream handlers can decide what to do.
