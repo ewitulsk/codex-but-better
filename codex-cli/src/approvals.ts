@@ -61,7 +61,11 @@ export type ApprovalPolicy =
    * where network access is disabled and writes are limited to a specific set
    * of paths.
    */
-  | "full-auto";
+  | "full-auto"
+  /**
+   * Auto‑approve everything (edits & commands) without sandboxing or prompts.
+   */
+  | "god-mode";
 
 /**
  * Tries to assess whether a command is safe to run, though may defer to the
@@ -114,21 +118,22 @@ export function canAutoApprove(
       // shell-quote cannot parse, so we should not reject, but ask the user.
       switch (policy) {
         case "full-auto":
-          // In full-auto, we still run the command automatically, but must
-          // restrict it to the sandbox.
           return {
             type: "auto-approve",
             reason: "Full auto mode",
             group: "Running commands",
             runInSandbox: true,
           };
+        case "god-mode":
+          return {
+            type: "auto-approve",
+            reason: "God mode",
+            group: "Running commands",
+            runInSandbox: false,
+          };
         case "suggest":
         case "auto-edit":
-          // In all other modes, since we cannot reason about the command, we
-          // should ask the user.
-          return {
-            type: "ask-user",
-          };
+          return { type: "ask-user" };
       }
     }
 
@@ -150,14 +155,22 @@ export function canAutoApprove(
     }
   }
 
-  return policy === "full-auto"
-    ? {
-        type: "auto-approve",
-        reason: "Full auto mode",
-        group: "Running commands",
-        runInSandbox: true,
-      }
-    : { type: "ask-user" };
+  if (policy === "full-auto") {
+    return {
+      type: "auto-approve",
+      reason: "Full auto mode",
+      group: "Running commands",
+      runInSandbox: true,
+    };
+  } else if (policy === "god-mode") {
+    return {
+      type: "auto-approve",
+      reason: "God mode",
+      group: "Running commands",
+      runInSandbox: false,
+    };
+  }
+  return { type: "ask-user" };
 }
 
 function canAutoApproveApplyPatch(
@@ -167,15 +180,11 @@ function canAutoApproveApplyPatch(
 ): SafetyAssessment {
   switch (policy) {
     case "full-auto":
-      // Continue to see if this can be auto-approved.
+    case "god-mode":
       break;
     case "suggest":
-      return {
-        type: "ask-user",
-        applyPatch: { patch: applyPatchArg },
-      };
+      return { type: "ask-user", applyPatch: { patch: applyPatchArg } };
     case "auto-edit":
-      // Continue to see if this can be auto-approved.
       break;
   }
 
@@ -189,18 +198,24 @@ function canAutoApproveApplyPatch(
     };
   }
 
-  return policy === "full-auto"
-    ? {
-        type: "auto-approve",
-        reason: "Full auto mode",
-        group: "Editing",
-        runInSandbox: true,
-        applyPatch: { patch: applyPatchArg },
-      }
-    : {
-        type: "ask-user",
-        applyPatch: { patch: applyPatchArg },
-      };
+  if (policy === "full-auto") {
+    return {
+      type: "auto-approve",
+      reason: "Full auto mode",
+      group: "Editing",
+      runInSandbox: true,
+      applyPatch: { patch: applyPatchArg },
+    };
+  } else if (policy === "god-mode") {
+    return {
+      type: "auto-approve",
+      reason: "God mode",
+      group: "Editing",
+      runInSandbox: false,
+      applyPatch: { patch: applyPatchArg },
+    };
+  }
+  return { type: "ask-user", applyPatch: { patch: applyPatchArg } };
 }
 
 /**

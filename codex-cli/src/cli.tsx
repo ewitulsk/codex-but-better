@@ -59,7 +59,7 @@ const cli = meow(
     -v, --view <rollout>       Inspect a previously saved rollout instead of starting a session
     -q, --quiet                Non-interactive mode that only prints the assistant's final output
     -c, --config               Open the instructions file in your editor
-    -a, --approval-mode <mode> Override the approval policy: 'suggest', 'auto-edit', or 'full-auto'
+    -a, --approval-mode <mode> Override the approval policy: 'suggest', 'auto-edit', 'full-auto', or 'god-mode'
 
     --auto-edit                Automatically approve file edits; still prompt for commands
     --full-auto                Automatically approve edits and commands when executed in the sandbox
@@ -120,7 +120,7 @@ const cli = meow(
         type: "string",
         aliases: ["a"],
         description:
-          "Determine the approval mode for Codex (default: suggest) Values: suggest, auto-edit, full-auto",
+          "Determine the approval mode for Codex (default: suggest) Values: suggest, auto-edit, full-auto, god-mode",
       },
       noProjectDoc: {
         type: "boolean",
@@ -319,6 +319,8 @@ if (quietMode) {
 const approvalPolicy: ApprovalPolicy =
   cli.flags.fullAuto || cli.flags.approvalMode === "full-auto"
     ? AutoApprovalMode.FULL_AUTO
+    : (cli.flags.dangerouslyAutoApproveEverything || cli.flags.approvalMode === "god-mode")
+    ? AutoApprovalMode.GOD_MODE
     : cli.flags.autoEdit || cli.flags.approvalMode === "auto-edit"
     ? AutoApprovalMode.AUTO_EDIT
     : AutoApprovalMode.SUGGEST;
